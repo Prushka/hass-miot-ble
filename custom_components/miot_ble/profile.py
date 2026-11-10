@@ -166,6 +166,7 @@ class DeviceProfile:
     auth_type: int
     properties: tuple[PropertySpec, ...]
     state_sensors: tuple[StateSensorSpec, ...] = ()
+    poll_properties: bool = False
 
     def __post_init__(self) -> None:
         """Reject incomplete or ambiguous profiles."""

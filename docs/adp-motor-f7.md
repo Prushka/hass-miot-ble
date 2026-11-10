@@ -87,6 +87,13 @@ BlueZ device path succeeded. Range/reconnection reliability needs longer observa
 - Do not retry F7 switch or mode commands after an error. A timeout can mean the
   motor received a command but its reply was lost. Inspect the device before retrying.
 - Keep a newer notification if it arrives before the write caller resumes.
+- Discard stale authentication parcels that arrived before the next transfer
+  header. A duplicated 16-byte challenge fragment could otherwise be combined with
+  part of the proof, producing a 30-byte payload where 32 bytes are required.
+  A synthetic retransmission test reproduces the failure and verifies the fix.
+- Refresh readable F7 properties every 60 seconds on an established connection.
+  This keeps readings current and avoids leaving the connection idle indefinitely.
+  The poll uses only GetProperty requests; notify-only battery is excluded.
 
 ## Local validation and installation
 
@@ -104,7 +111,7 @@ uv run --no-sync pytest
 Tests cover real advertisement discovery and read-response captures, GATT access
 permissions, Boolean/enum wire encoding, late battery notifications, startup ordering,
 write acknowledgements/rejections, and prevention of duplicate motor writes.
-Validation on 2026-11-10: 245 tests passed, 91.95% combined line/branch coverage;
+Validation on 2026-11-10: 251 tests passed, 92.02% combined line/branch coverage;
 Ruff lint and formatting checks passed. The unchanged upstream baseline passed
 217 tests with 90.69% coverage in the same Linux environment.
 

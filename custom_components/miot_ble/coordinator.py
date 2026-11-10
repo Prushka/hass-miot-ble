@@ -176,7 +176,10 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         if self._manually_disconnected:
             return dict(self.data or {})
         try:
+            was_connected = self.connected
             session = await self._ensure_session()
+            if was_connected and self.profile.poll_properties:
+                await session.request_properties(self._properties)
             return {key: result.value for key, result in session.property_values.items()}
         except AuthenticationError as error:
             _LOGGER.warning(

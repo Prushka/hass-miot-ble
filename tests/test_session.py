@@ -16,7 +16,12 @@ from custom_components.miot_ble.const import (
     UUID_MIOT_WRITE,
     UUID_UPNP,
 )
-from custom_components.miot_ble.profiles import MUXNW_DRYER_M73, SOOCARE_MAGIC_TOUCH_M14
+from custom_components.miot_ble.profile import DeviceProfile
+from custom_components.miot_ble.profiles import (
+    ADP_MOTOR_F7,
+    MUXNW_DRYER_M73,
+    SOOCARE_MAGIC_TOUCH_M14,
+)
 from custom_components.miot_ble.protocol import miot_v2
 from custom_components.miot_ble.protocol.crypto import MeshSessionKeys, SessionKeys
 from custom_components.miot_ble.protocol.session import (
@@ -165,6 +170,86 @@ async def test_auth_login_accepts_direct_device_data() -> None:
     await session.login(open_property_session=False)
 
     assert [write[1] for write in client.writes].count(ACK_DATA) == 2
+
+
+async def test_auth_retransmitted_parcel_does_not_contaminate_next_transfer() -> None:
+    client = FakeClient()
+    session = MiotBleSession(client, TOKEN, MUXNW_DRYER_M73, random_bytes=lambda size: APP_RANDOM)
+    await session.start()
+    keys = SessionKeys.derive(TOKEN, APP_RANDOM, DEVICE_RANDOM)
+    proof = keys.expected_device_proof(APP_RANDOM, DEVICE_RANDOM)
+    feed(
+        session,
+        UUID_AUTH,
+        RECEIVE_READY,
+        RECEIVE_OK,
+        auth_header(AUTH_RESPONSE_KEY, 1),
+        parcel(1, DEVICE_RANDOM),
+        parcel(1, DEVICE_RANDOM),
+        auth_header(AUTH_RESPONSE_INFO, 2),
+        parcel(1, proof[:18]),
+        parcel(2, proof[18:]),
+        RECEIVE_READY,
+        RECEIVE_OK,
+    )
+    feed(session, UUID_UPNP, CONFIRM_LOGIN)
+    await session.login(open_property_session=False)
+    assert session.authenticated
+
+
+async def test_transfer_boundary_preserves_other_notifications() -> None:
+    inbox = NotificationInbox()
+    inbox.feed(UUID_AUTH, parcel(1, b"stale"))
+    inbox.feed(UUID_UPNP, CONFIRM_LOGIN)
+    inbox.feed(UUID_AUTH, RECEIVE_READY)
+    inbox.feed(UUID_AUTH, auth_header(AUTH_RESPONSE_INFO, 1))
+    inbox.feed(UUID_AUTH, parcel(1, b"current"))
+    assert await inbox.wait_for(
+        lambda uuid, data: data == auth_header(AUTH_RESPONSE_INFO, 1),
+        0.1,
+        discard_before=lambda uuid, data: uuid == UUID_AUTH and data[:2] != bytes(2),
+    ) == (UUID_AUTH, auth_header(AUTH_RESPONSE_INFO, 1))
+    assert await inbox.wait_for(lambda uuid, data: data[:2] == b"\x01\x00", 0.1) == (
+        UUID_AUTH,
+        parcel(1, b"current"),
+    )
+    assert await inbox.wait_for(lambda uuid, data: uuid == UUID_UPNP, 0.1) == (
+        UUID_UPNP,
+        CONFIRM_LOGIN,
+    )
+    assert await inbox.wait_for(lambda uuid, data: data == RECEIVE_READY, 0.1) == (
+        UUID_AUTH,
+        RECEIVE_READY,
+    )
+
+
+@pytest.mark.parametrize(
+    ("profile", "key", "expected"),
+    [
+        pytest.param(ADP_MOTOR_F7, (2, 1), "0920b1000201020100", id="standard-auth"),
+        pytest.param(SOOCARE_MAGIC_TOUCH_M14, (3, 1), "0920b1000201030100", id="security-chip"),
+    ],
+)
+async def test_background_property_refresh_uses_only_get(
+    profile: DeviceProfile, key: tuple[int, int], expected: str
+) -> None:
+    session = MiotBleSession(FakeClient(), TOKEN, profile)
+    session._send_request = AsyncMock()
+    session._receiver_task = asyncio.create_task(asyncio.Event().wait())
+    try:
+        await session.request_properties((profile.property(*key),))
+        session._send_request.assert_awaited_once_with(bytes.fromhex(expected))
+    finally:
+        await session.async_close()
+
+
+async def test_background_refresh_requires_receiver_and_skips_notify_only() -> None:
+    session = MiotBleSession(FakeClient(), TOKEN, ADP_MOTOR_F7)
+    session._send_request = AsyncMock()
+    await session.request_properties((ADP_MOTOR_F7.property(2, 6),))
+    session._send_request.assert_not_awaited()
+    with pytest.raises(MiotBleError, match="receiver is not running"):
+        await session.request_properties((ADP_MOTOR_F7.property(2, 1),))
 
 
 @pytest.mark.asyncio

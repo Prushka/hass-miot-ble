@@ -7,6 +7,7 @@ PROFILE = DeviceProfile(
     name="Adaprox Fingerbot Pro",
     spec_type="urn:miot-spec-v2:device:motor-controller:0000A01D:adp-f7:1",
     auth_type=4,
+    poll_properties=True,
     properties=(
         PropertySpec(
             name="switch",

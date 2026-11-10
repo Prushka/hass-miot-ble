@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.const import CONF_ADDRESS, CONF_MODEL
@@ -290,3 +290,30 @@ async def test_f7_newer_notification_wins_over_write_confirmation(hass: HomeAssi
     coordinator._ensure_session = AsyncMock(return_value=session)
     await coordinator.async_set_property(ADP_MOTOR_F7.property(2, 1), True)
     assert coordinator.data[(2, 1)] is False
+
+
+async def test_f7_polls_existing_session_without_motor_writes(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Fingerbot",
+        data={
+            CONF_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_MODEL: ADP_MOTOR_F7.model,
+            CONF_TOKEN: "00" * 12,
+        },
+    )
+    entry.add_to_hass(hass)
+    coordinator = MiotBleCoordinator(hass, entry)
+    session = SimpleNamespace(
+        authenticated=True,
+        receiver_running=True,
+        raise_if_receiver_failed=MagicMock(),
+        property_values={(2, 1): PropertyValue(2, 1, ValueType.BOOL, False)},
+        request_properties=AsyncMock(),
+        set_property=AsyncMock(),
+    )
+    coordinator._client = SimpleNamespace(is_connected=True)
+    coordinator._session = session
+    assert await coordinator._async_update_data() == {(2, 1): False}
+    session.request_properties.assert_awaited_once_with(ADP_MOTOR_F7.properties)
+    session.set_property.assert_not_awaited()

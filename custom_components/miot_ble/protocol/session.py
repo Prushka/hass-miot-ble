@@ -81,10 +81,23 @@ class NotificationInbox:
         self._items.append((uuid.lower(), bytes(data)))
         self._event.set()
 
-    def _take(self, predicate: Callable[[str, bytes], bool]) -> tuple[str, bytes] | None:
+    def _take(
+        self,
+        predicate: Callable[[str, bytes], bool],
+        discard_before: Callable[[str, bytes], bool] | None = None,
+    ) -> tuple[str, bytes] | None:
         for index, item in enumerate(self._items):
             if predicate(*item):
                 del self._items[index]
+                if discard_before is not None:
+                    self._items = deque(
+                        (
+                            queued
+                            for position, queued in enumerate(self._items)
+                            if position >= index or not discard_before(*queued)
+                        ),
+                        maxlen=self._items.maxlen,
+                    )
                 return item
         return None
 
@@ -92,12 +105,14 @@ class NotificationInbox:
         self,
         predicate: Callable[[str, bytes], bool],
         timeout: float,
+        *,
+        discard_before: Callable[[str, bytes], bool] | None = None,
     ) -> tuple[str, bytes]:
         """Wait for a matching notification and retain non-matching frames."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            item = self._take(predicate)
+            item = self._take(predicate, discard_before)
             if item is not None:
                 return item
             remaining = deadline - loop.time()
@@ -107,7 +122,7 @@ class NotificationInbox:
             try:
                 await asyncio.wait_for(self._event.wait(), remaining)
             except TimeoutError:
-                item = self._take(predicate)
+                item = self._take(predicate, discard_before)
                 if item is not None:
                     return item
                 raise ResponseTimeoutError("Timed out waiting for a BLE notification") from None
@@ -241,6 +256,10 @@ class MiotBleSession:
                 and data[2] in (0, 2)
             ),
             self._timeout,
+            # Parcel numbers restart for each transfer; older retransmissions are stale.
+            discard_before=lambda uuid, data: (
+                uuid == UUID_AUTH and len(data) >= 2 and data[:2] != bytes(2)
+            ),
         )
         if frame[2] == 2:
             payload = frame[4:]
@@ -585,6 +604,23 @@ class MiotBleSession:
             name="miot-ble-property-notifications",
         )
         return values
+
+    async def request_properties(self, properties: tuple[PropertySpec, ...]) -> None:
+        """Request fresh values for the background notification receiver."""
+        properties = tuple(prop for prop in properties if prop.readable)
+        if not properties:
+            return
+        async with self._command_lock:
+            self.raise_if_receiver_failed()
+            if not self.receiver_running:
+                raise MiotBleError("Property notification receiver is not running")
+            transaction_id = self._next_transaction_id()
+            request = (
+                miot_v2.build_get(transaction_id, properties)
+                if self._uses_mesh
+                else build_subscribe(transaction_id, properties)
+            )
+            await self._send_request(request)
 
     def _record_properties(self, values: tuple[PropertyValue, ...]) -> None:
         """Store property values and notify the integration callback."""
