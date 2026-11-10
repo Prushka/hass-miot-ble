@@ -514,11 +514,18 @@ class MiotBleSession:
             payload = bytes((5, 0x20, self._next_transaction_id(), 0, Operation.OPEN))
             await self._send_request(payload)
             try:
-                response = await self._receive_encrypted(timeout=min(1.0, self._timeout))
-            except ResponseTimeoutError:
+                async with asyncio.timeout(min(1.0, self._timeout)):
+                    while True:
+                        response = await self._receive_encrypted()
+                        if len(response) >= 5 and response[4] == Operation.OPEN:
+                            return
+                        try:
+                            values = parse_properties(response)
+                        except ValueError as error:
+                            raise MiotBleError("Unexpected property-session response") from error
+                        self._record_properties(values)
+            except ResponseTimeoutError, TimeoutError:
                 return
-            if len(response) < 5 or response[4] != Operation.OPEN:
-                raise MiotBleError("Unexpected property-session response")
 
     async def read_properties(
         self,
@@ -527,6 +534,8 @@ class MiotBleSession:
         """Subscribe to properties and return their initial values."""
         if self._receiver_task is not None:
             raise MiotBleError("The property receiver already owns the notification stream")
+        # Notify-only properties may never produce an initial value.
+        properties = tuple(prop for prop in properties if prop.readable)
         expected = {prop.key for prop in properties}
         if not expected:
             return {}
@@ -598,36 +607,34 @@ class MiotBleSession:
                 except ResponseTimeoutError:
                     continue
                 try:
+                    if len(payload) >= 5 and payload[4] == 1:
+                        transaction_id, results = miot_v2.parse_set_response(payload)
+                        for siid, piid, status in results:
+                            pending_response = self._pending_responses.get(transaction_id)
+                            if (
+                                pending_response is not None
+                                and pending_response[0] == (siid, piid)
+                                and not pending_response[2].done()
+                            ):
+                                if status:
+                                    pending_response[2].set_exception(
+                                        MiotBleError(f"Device rejected property write: {status}")
+                                    )
+                                else:
+                                    expected_spec = self.profile.property(siid, piid)
+                                    expected_value = pending_response[1]
+                                    confirmed = PropertyValue(
+                                        siid,
+                                        piid,
+                                        expected_spec.value_type,
+                                        bool(expected_value)
+                                        if expected_spec.value_type.name == "BOOL"
+                                        else expected_value,
+                                    )
+                                    self._record_properties((confirmed,))
+                                    pending_response[2].set_result(confirmed)
+                        continue
                     if self._uses_mesh:
-                        if len(payload) >= 5 and payload[4] == 1:
-                            transaction_id, results = miot_v2.parse_set_response(payload)
-                            for siid, piid, status in results:
-                                pending_response = self._pending_responses.get(transaction_id)
-                                if (
-                                    pending_response is not None
-                                    and pending_response[0] == (siid, piid)
-                                    and not pending_response[2].done()
-                                ):
-                                    if status:
-                                        pending_response[2].set_exception(
-                                            MiotBleError(
-                                                f"Device rejected property write: {status}"
-                                            )
-                                        )
-                                    else:
-                                        expected_spec = self.profile.property(siid, piid)
-                                        expected_value = pending_response[1]
-                                        pending_response[2].set_result(
-                                            PropertyValue(
-                                                siid,
-                                                piid,
-                                                expected_spec.value_type,
-                                                bool(expected_value)
-                                                if expected_spec.value_type.name == "BOOL"
-                                                else expected_value,
-                                            )
-                                        )
-                            continue
                         try:
                             _, values = miot_v2.parse_properties(payload)
                         except ValueError:

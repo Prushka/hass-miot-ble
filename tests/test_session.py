@@ -577,7 +577,7 @@ async def test_unexpected_property_open_response() -> None:
     session = MiotBleSession(FakeClient(), TOKEN, MUXNW_DRYER_M73)
     session._keys = SessionKeys.derive(TOKEN, APP_RANDOM, DEVICE_RANDOM)
     feed(session, UUID_MIOT_WRITE, RECEIVE_READY, RECEIVE_OK)
-    response = bytes.fromhex("0c20b1000401020100011001")
+    response = bytes.fromhex("0520b100ff")
     feed(session, UUID_MIOT_NOTIFY, direct_response(session._keys, 0, response))
     with pytest.raises(MiotBleError, match="Unexpected"):
         await session.open_property_session()

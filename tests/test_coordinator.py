@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.const import CONF_ADDRESS, CONF_MODEL
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -36,7 +37,7 @@ def make_coordinator(hass) -> MiotBleCoordinator:
 
 
 @pytest.mark.asyncio
-async def test_update_and_set_property(hass) -> None:
+async def test_update_and_set_property(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass)
     power = MUXNW_DRYER_M73.property(2, 1)
     session = SimpleNamespace(
@@ -48,6 +49,7 @@ async def test_update_and_set_property(hass) -> None:
     data = await coordinator._async_update_data()
     assert data == {(2, 1): 1}
     coordinator.async_set_updated_data(data)
+    session.property_values[(2, 1)] = PropertyValue(2, 1, ValueType.UINT8, 0)
     await coordinator.async_set_property(power, 0)
     assert coordinator.data[(2, 1)] == 0
 
@@ -95,12 +97,13 @@ async def test_set_failure_drops_connection(hass, caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_reconnects_and_retries_once(hass) -> None:
+async def test_set_reconnects_and_retries_once(hass: HomeAssistant) -> None:
     coordinator = make_coordinator(hass)
     power = MUXNW_DRYER_M73.property(2, 1)
     failed_session = SimpleNamespace(set_property=AsyncMock(side_effect=ConnectionError("lost")))
     recovered_session = SimpleNamespace(
-        set_property=AsyncMock(return_value=PropertyValue(2, 1, ValueType.UINT8, 1))
+        set_property=AsyncMock(return_value=PropertyValue(2, 1, ValueType.UINT8, 1)),
+        property_values={},
     )
     coordinator._ensure_session = AsyncMock(side_effect=[failed_session, recovered_session])
     coordinator._drop_connection = AsyncMock()

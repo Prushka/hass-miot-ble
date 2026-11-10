@@ -200,24 +200,28 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
     async def async_set_property(self, prop: PropertySpec, value: int | bool) -> None:
         """Write one property and update the coordinator cache."""
         async with self._write_lock:
-            for attempt in range(2):
+            attempts = 2 if prop.retry_writes else 1
+            for attempt in range(attempts):
                 try:
                     session = await self._ensure_session()
                     changed = await session.set_property(prop, value)
+                    # A momentary control can report a newer value before this task resumes.
+                    changed = session.property_values.get(changed.key, changed)
                     data = dict(self.data or {})
                     data[changed.key] = changed.value
                     self.async_set_updated_data(data)
                     return
                 except Exception as error:
                     _LOGGER.warning(
-                        "Xiaomi BLE write failed for %s (attempt %d/2): %s",
+                        "Xiaomi BLE write failed for %s (attempt %d/%d): %s",
                         self.address,
                         attempt + 1,
+                        attempts,
                         error,
                         exc_info=True,
                     )
                     await self._drop_connection()
-                    if attempt:
+                    if attempt + 1 == attempts:
                         raise
 
     async def async_connect(self) -> None:

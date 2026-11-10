@@ -73,6 +73,7 @@ class PropertySpec:
     unit: str | None = None
     value_map: tuple[tuple[int, str], ...] = ()
     value_multiplier: int = 1
+    retry_writes: bool = True
 
     def __post_init__(self) -> None:
         """Validate profile metadata at import time."""

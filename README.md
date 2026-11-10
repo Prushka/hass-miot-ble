@@ -5,10 +5,17 @@
 `hass-miot-ble` is a Home Assistant custom integration for controlling supported
 Xiaomi Miot Bluetooth Low Energy devices locally.
 
+This fork adds experimental `adp.motor.f7` (Adaprox Fingerbot Pro) support.
+Direct Bluetooth authentication and status reads have been verified on hardware;
+motor writes have only been tested in simulation. See the
+[Fingerbot implementation and validation notes](docs/adp-motor-f7.md) before
+installing this checkout. The upstream HACS release does not include this profile.
+
 ## Supported devices
 
 | Device | Model | Available controls and states |
 | --- | --- | --- |
+| Adaprox Fingerbot Pro (experimental) | `adp.motor.f7` | Switch, mode, battery notifications, charging status, total movements |
 | Muxiang M73 Shoe Dryer | `muxnw.dryer.m73` | Power, UV, timer, remaining time |
 | Xiaomi Smart Waist Massager YB01 | `xiaomi.magic_touch.yb01` | Power, device status, mode, timer, heating, battery |
 | Xiaomi Smart Waist and Back Massager YB11 | `xiaomi.magic_touch.yb11` | Power, device status, mode, timer, heating, regional massage, beep, battery |

@@ -10,6 +10,7 @@ from custom_components.miot_ble.profile import (
     ValueType,
 )
 from custom_components.miot_ble.profiles import (
+    ADP_MOTOR_F7,
     MUXNW_DRYER_M73,
     SOOCARE_MAGIC_TOUCH_M14,
     XIAOMI_MAGIC_TOUCH_YB01,
@@ -28,6 +29,7 @@ def test_m73_profile_matches_plugin_bundle() -> None:
     assert profile.property(2, 3).maximum == 6
     assert profile.property(2, 4).value_type is ValueType.UINT16
     assert list(iter_profiles()) == [
+        ADP_MOTOR_F7,
         profile,
         SOOCARE_MAGIC_TOUCH_M14,
         XIAOMI_MAGIC_TOUCH_YB01,

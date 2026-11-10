@@ -4,6 +4,26 @@ This document records the captured Mi Home plugin evidence and assumptions used
 by each profile. Hardware behavior can differ across firmware revisions, so
 these details should be updated when a real device reveals a protocol change.
 
+## Adaprox Fingerbot Pro
+
+- Model: `adp.motor.f7`
+- MiBeacon product ID: `0x9396` (`37782`), observed in FE95 service data
+- Miot type: `urn:miot-spec-v2:device:motor-controller:0000A01D:adp-f7:1`
+- Authentication: 12-byte Xiaomi Standard Auth token, verified on hardware
+- Firmware tested: `2.1.0_0119`
+- Hardware validation: authentication and read-only status on 2026-11-10
+
+The public spec's `access` arrays are empty for service 2, but its separate
+`gatt-access` arrays permit Bluetooth reads, writes, and notifications. The
+profile follows those Bluetooth permissions. Battery `2/6` is notify-only;
+initial reads exclude it, and the background receiver handles later updates.
+Switch `2/1` and mode `2/2` are the only writable properties exposed. Both disable
+automatic write retries because a lost reply must not cause another motor command.
+
+The device can send a mode notification while opening the property channel and
+delay the `F0` echo until after the next read request. These captured sequences
+are covered by regression tests. See [detailed evidence and limitations](adp-motor-f7.md).
+
 ## Xiaomi Smart Neck Massager M14
 
 - Model: `soocare.magic_touch.m14`

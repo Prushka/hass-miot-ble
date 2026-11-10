@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from ..profile import DeviceProfile
+from .adp_motor_f7 import PROFILE as ADP_MOTOR_F7
 from .muxnw_dryer_m73 import PROFILE as MUXNW_DRYER_M73
 from .soocare_magic_touch_m14 import PROFILE as SOOCARE_MAGIC_TOUCH_M14
 from .xiaomi_magic_touch_yb01 import PROFILE as XIAOMI_MAGIC_TOUCH_YB01
@@ -13,6 +14,7 @@ from .xiaomi_magic_touch_yb11 import PROFILE as XIAOMI_MAGIC_TOUCH_YB11
 _PROFILES = {
     profile.model: profile
     for profile in (
+        ADP_MOTOR_F7,
         MUXNW_DRYER_M73,
         SOOCARE_MAGIC_TOUCH_M14,
         XIAOMI_MAGIC_TOUCH_YB01,
@@ -20,6 +22,7 @@ _PROFILES = {
     )
 }
 _PRODUCT_ID_PROFILES = {
+    0x9396: ADP_MOTOR_F7,
     0x46C6: XIAOMI_MAGIC_TOUCH_YB01,
     0x5A5B: MUXNW_DRYER_M73,
     0x8FD3: XIAOMI_MAGIC_TOUCH_YB11,
@@ -55,6 +58,7 @@ def profile_for_bluetooth_name(name: str | None) -> DeviceProfile | None:
 
 
 __all__ = [
+    "ADP_MOTOR_F7",
     "MUXNW_DRYER_M73",
     "SOOCARE_MAGIC_TOUCH_M14",
     "XIAOMI_MAGIC_TOUCH_YB01",
