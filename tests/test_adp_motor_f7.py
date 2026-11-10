@@ -271,6 +271,25 @@ async def test_standard_auth_rejects_failed_set_ack() -> None:
         await session.async_close()
 
 
+async def test_poll_snapshot_cannot_confirm_a_rejected_write() -> None:
+    session = MiotBleSession(AsyncMock(), bytes(12), ADP_MOTOR_F7)
+    incoming: asyncio.Queue[bytes] = asyncio.Queue()
+    session._receive_encrypted = incoming.get
+
+    async def send(request: bytes) -> None:
+        incoming.put_nowait(bytes.fromhex("0e20b00003010201000000010001"))
+        incoming.put_nowait(bytes.fromhex("0b20b10001010201000300"))
+
+    session._send_request = AsyncMock(side_effect=send)
+    session._receiver_task = asyncio.create_task(session._receive_property_notifications())
+    try:
+        with pytest.raises(MiotBleError, match="rejected property write: 3"):
+            await session.set_property(ADP_MOTOR_F7.property(2, 1), True)
+        assert session._pending_responses == {}
+    finally:
+        await session.async_close()
+
+
 async def test_f7_newer_notification_wins_over_write_confirmation(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,

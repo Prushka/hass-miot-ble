@@ -684,6 +684,8 @@ class MiotBleSession:
                     )
                     continue
                 self._record_properties(values)
+                if payload[4] != Operation.NOTIFY:
+                    continue
                 for expected_key, expected_value, pending in self._pending_responses.values():
                     for value in values:
                         if (

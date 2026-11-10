@@ -94,6 +94,8 @@ BlueZ device path succeeded. Range/reconnection reliability needs longer observa
 - Refresh readable F7 properties every 60 seconds on an established connection.
   This keeps readings current and avoids leaving the connection idle indefinitely.
   The poll uses only GetProperty requests; notify-only battery is excluded.
+- A polling snapshot updates state but cannot confirm a pending write. Write
+  completion requires a matching acknowledgement or a property-change notification.
 
 ## Local validation and installation
 
@@ -111,7 +113,7 @@ uv run --no-sync pytest
 Tests cover real advertisement discovery and read-response captures, GATT access
 permissions, Boolean/enum wire encoding, late battery notifications, startup ordering,
 write acknowledgements/rejections, and prevention of duplicate motor writes.
-Validation on 2026-11-10: 251 tests passed, 92.02% combined line/branch coverage;
+Validation on 2026-11-10: 252 tests passed, 92.03% combined line/branch coverage;
 Ruff lint and formatting checks passed. The unchanged upstream baseline passed
 217 tests with 90.69% coverage in the same Linux environment.
 

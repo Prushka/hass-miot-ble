@@ -19,5 +19,5 @@
     "cryptography>=43.0.0",
     "xiaomi-ble>=1.21.2,<2"
   ],
-  "version": "0.12.1"
+  "version": "0.12.2"
 }
