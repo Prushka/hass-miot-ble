@@ -241,7 +241,18 @@ class MiotBleConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             await self.async_set_unique_id(address, raise_on_progress=False)
             self._abort_if_unique_id_configured()
-            return await self.async_step_cloud_account()
+            supplied_key = str(user_input.get(CONF_TOKEN) or "").strip()
+            if not supplied_key:
+                return await self.async_step_cloud_account()
+            try:
+                token = normalize_device_key(supplied_key, profile.model)
+            except ValueError:
+                errors[CONF_TOKEN] = "invalid_key"
+            else:
+                result, error = await self._async_finish_setup(token)
+                if result is not None:
+                    return result
+                errors["base"] = error
 
         values = user_input or {}
         address_default = self._discovered_address or values.get(CONF_ADDRESS, "")
@@ -254,6 +265,9 @@ class MiotBleConfigFlow(ConfigFlow, domain=DOMAIN):
                         {address: details[0] for address, details in devices.items()}
                     ),
                     vol.Optional(CONF_NAME, default=name_default): cv.string,
+                    vol.Optional(CONF_TOKEN): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    ),
                 }
             ),
             errors=errors,

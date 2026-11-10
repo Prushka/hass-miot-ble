@@ -104,14 +104,21 @@ uv run --no-sync pytest
 Tests cover real advertisement discovery and read-response captures, GATT access
 permissions, Boolean/enum wire encoding, late battery notifications, startup ordering,
 write acknowledgements/rejections, and prevention of duplicate motor writes.
-Validation on 2026-11-10: 240 tests passed, 91.91% combined line/branch coverage;
+Validation on 2026-11-10: 245 tests passed, 91.95% combined line/branch coverage;
 Ruff lint and formatting checks passed. The unchanged upstream baseline passed
 217 tests with 90.69% coverage in the same Linux environment.
 
 When ready for a supervised test, install `custom_components/miot_ble` from this
 checkout using the manual installation steps in the README, then add Xiaomi Miot
 BLE and select the discovered Fingerbot. The existing Xiaomi binding and token are
-used; resetting or pairing the device again is unnecessary. Verify status first.
+used; resetting or pairing the device again is unnecessary. If you already have
+the device key, the optional Existing Bluetooth key field allows setup without
+a new Xiaomi sign-in. Keys are stored only in Home Assistant's local config entry
+and are not echoed into setup forms after validation errors. Verify status first.
 Keep the physical control visible for the first explicit command and verify its
 effect before connecting it to an automation. The upstream HACS release does not
 contain this experimental profile.
+
+Version 0.12.0 accepts `xiaomi-ble>=1.21.2,<2`, avoiding a downgrade of the newer
+library bundled with Home Assistant 2026.11. Standard Auth and security-chip key
+formats are both covered by setup tests.

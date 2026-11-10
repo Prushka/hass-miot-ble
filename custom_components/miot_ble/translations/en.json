@@ -4,10 +4,11 @@
     "step": {
       "user": {
         "title": "Add a Xiaomi Miot BLE device",
-        "description": "Select a supported nearby device. Home Assistant will prepare local Bluetooth access automatically.",
+        "description": "Select a supported nearby device. If you already have its local Bluetooth key, enter it below. Otherwise, leave it empty to sign in to Xiaomi.",
         "data": {
           "address": "Bluetooth device",
-          "name": "Name"
+          "name": "Name",
+          "token": "Existing Bluetooth key (optional)"
         }
       },
       "cloud_auth": {
@@ -43,6 +44,7 @@
     "error": {
       "cannot_connect": "Unable to connect to the device",
       "invalid_auth": "The device rejected the local access key",
+      "invalid_key": "Enter 24 hexadecimal characters for Standard Auth, or 64 for a security-chip device",
       "cloud_invalid_auth": "Xiaomi rejected the account sign-in",
       "cloud_invalid_account": "Xiaomi rejected the account identifier (error 20003/70002). Try the Xiaomi ID, email address, or full phone number used by Xiaomi Home",
       "cloud_invalid_password": "Xiaomi rejected the password (error 70016)",

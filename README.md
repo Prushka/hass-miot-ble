@@ -44,4 +44,6 @@ Home Assistant configuration directory, then restart Home Assistant.
    proxy and the device is nearby.
 2. Open **Settings** > **Devices & services** > **Add integration**.
 3. Search for **Xiaomi Miot BLE** and select a supported device.
-4. Sign in to the Xiaomi account that owns the device when prompted.
+4. If you already have the device's Bluetooth key, enter it in the optional key
+   field. Otherwise, leave it empty and sign in to the Xiaomi account that owns
+   the device when prompted. The supplied key is authenticated before setup completes.

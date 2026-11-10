@@ -1,6 +1,6 @@
 [project]
 name = "hass-miot-ble"
-version = "0.11.0"
+version = "0.12.0"
 description = "Local Xiaomi Miot BLE control for Home Assistant"
 readme = "README.md"
 requires-python = ">=3.14.2,<3.15"
@@ -8,7 +8,7 @@ license = "MIT"
 dependencies = [
     "bleak-retry-connector>=4.7.1",
     "cryptography>=43.0.0",
-    "xiaomi-ble==1.16.1",
+    "xiaomi-ble>=1.21.2,<2",
 ]
 
 [dependency-groups]

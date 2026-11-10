@@ -4,10 +4,11 @@
     "step": {
       "user": {
         "title": "添加小米 Miot 蓝牙设备",
-        "description": "选择附近的受支持设备，Home Assistant 将自动准备本地蓝牙访问。",
+        "description": "选择附近的受支持设备。如果已有本地蓝牙密钥，可在下方输入；否则留空以登录小米账号。",
         "data": {
           "address": "蓝牙设备",
-          "name": "名称"
+          "name": "名称",
+          "token": "现有蓝牙密钥（可选）"
         }
       },
       "cloud_auth": {
@@ -41,6 +42,7 @@
       }
     },
     "error": {
+      "invalid_key": "标准认证设备请输入 24 位十六进制字符，安全芯片设备请输入 64 位",
       "cannot_connect": "无法连接设备",
       "invalid_auth": "设备拒绝了本地访问密钥",
       "cloud_invalid_auth": "小米拒绝了账号登录",
