@@ -20,7 +20,17 @@ def device_info(coordinator: MiotBleCoordinator) -> DeviceInfo:
     )
 
 
-class MiotBleEntity(CoordinatorEntity[MiotBleCoordinator]):
+class MiotBleDataEntity(CoordinatorEntity[MiotBleCoordinator]):
+    """Keep last-known properties accessible between on-demand sessions."""
+
+    @property
+    def available(self) -> bool:
+        if self.coordinator.profile.on_demand:
+            return not self.coordinator.manually_disconnected
+        return super().available and self.coordinator.connected
+
+
+class MiotBleEntity(MiotBleDataEntity):
     """Represent one Miot property in Home Assistant."""
 
     _attr_has_entity_name = True
@@ -32,11 +42,6 @@ class MiotBleEntity(CoordinatorEntity[MiotBleCoordinator]):
         self._attr_unique_id = f"{address}_{prop.siid}_{prop.piid}"
         self._attr_name = prop.name.replace("_", " ").title()
         self._attr_device_info = device_info(coordinator)
-
-    @property
-    def available(self) -> bool:
-        """Return whether the device property channel is connected."""
-        return super().available and self.coordinator.connected
 
     @property
     def property_value(self) -> int | bool | None:

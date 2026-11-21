@@ -44,3 +44,10 @@ class MiotBleSwitch(MiotBleEntity, SwitchEntity):
         """Disable the property."""
         value = False if self.property_spec.value_type is ValueType.BOOL else 0
         await self.coordinator.async_set_property(self.property_spec, value)
+
+    async def async_toggle(self, **kwargs: object) -> None:
+        """Use the live position to toggle a sleeping device."""
+        if self.coordinator.profile.on_demand:
+            await self.coordinator.async_toggle_switch(self.property_spec)
+        else:
+            await super().async_toggle(**kwargs)

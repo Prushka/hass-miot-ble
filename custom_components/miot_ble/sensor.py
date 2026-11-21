@@ -7,10 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import MiotBleCoordinator
-from .entity import MiotBleEntity, device_info
+from .entity import MiotBleDataEntity, MiotBleEntity, device_info
 from .profile import EntityKind, PropertySpec, StateSensorSpec
 
 
@@ -59,7 +58,7 @@ class MiotBleSensor(MiotBleEntity, SensorEntity):
         return value * self.property_spec.value_multiplier
 
 
-class MiotBleStateSensor(CoordinatorEntity[MiotBleCoordinator], SensorEntity):
+class MiotBleStateSensor(MiotBleDataEntity, SensorEntity):
     """Expose a mapped device state derived from a Miot property."""
 
     _attr_has_entity_name = True
@@ -74,11 +73,6 @@ class MiotBleStateSensor(CoordinatorEntity[MiotBleCoordinator], SensorEntity):
         self._attr_device_info = device_info(coordinator)
         self._value_map = dict(spec.value_map)
         self._attr_options = list(self._value_map.values())
-
-    @property
-    def available(self) -> bool:
-        """Return whether the device property channel is connected."""
-        return super().available and self.coordinator.connected
 
     @property
     def native_value(self) -> str | None:

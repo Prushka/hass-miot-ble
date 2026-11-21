@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 
 from bleak import BleakClient
@@ -11,7 +13,8 @@ from bleak_retry_connector import establish_connection
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_MODEL
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_TOKEN, DEFAULT_UPDATE_INTERVAL, DOMAIN
@@ -20,8 +23,14 @@ from .profiles import get_profile
 from .protocol import AuthenticationError, MiotBleSession, PropertyValue
 
 _LOGGER = logging.getLogger(__name__)
+ON_DEMAND_TIMEOUT = 45
 
 type PropertyData = dict[tuple[int, int], int | bool]
+
+
+def property_store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict[str, int | bool]]:
+    """Return the last reported values for one config entry."""
+    return Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.state")
 
 
 def async_ble_device_from_address(hass: HomeAssistant, address: str):
@@ -42,16 +51,36 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         self._client: BleakClient | None = None
         self._session: MiotBleSession | None = None
         self._connection_lock = asyncio.Lock()
-        self._write_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
         self._manually_disconnected = False
+        self._store = property_store(hass, entry) if self.profile.on_demand else None
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=f"{DOMAIN}_{self.address}",
-            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
+            update_interval=None
+            if self.profile.on_demand
+            else timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
             always_update=False,
         )
+
+    async def async_initialize(self) -> None:
+        """Restore on-demand devices without opening a Bluetooth connection."""
+        if self._store is None:
+            await self.async_config_entry_first_refresh()
+            return
+        stored = await self._store.async_load() or {}
+        data: PropertyData = {}
+        for prop in self._properties:
+            if prop.name in stored:
+                value = stored[prop.name]
+                try:
+                    prop.validate_value(value)
+                except TypeError, ValueError:
+                    continue
+                data[prop.key] = value
+        self.async_set_updated_data(data)
 
     def _disconnected(self, client: BleakClient) -> None:
         if client is self._client:
@@ -62,7 +91,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
             if session is not None:
                 session.cancel_background_tasks()
             self.async_update_listeners()
-            if self._manually_disconnected:
+            if self.profile.on_demand or self._manually_disconnected or self._shutdown_requested:
                 return
             self.hass.async_create_task(
                 self.async_refresh(),
@@ -104,6 +133,8 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         self.async_set_updated_data(data)
 
     async def _ensure_session(self) -> MiotBleSession:
+        if self._shutdown_requested:
+            raise ConnectionError("Bluetooth connection manager has stopped")
         if self._manually_disconnected:
             raise ConnectionError("Bluetooth connection is manually disconnected")
         if self.connected:
@@ -156,7 +187,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                     lambda values: self._handle_property_values(session, values),
                 )
                 self.async_update_listeners()
-            except Exception as error:
+            except (Exception, asyncio.CancelledError) as error:
                 _LOGGER.warning(
                     "Xiaomi BLE device %s failed while %s: %s",
                     self.address,
@@ -167,20 +198,51 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                 if session is self._session:
                     self._session = None
                     self._client = None
-                await session.async_close()
-                await client.disconnect()
+                try:
+                    await session.async_close()
+                finally:
+                    await client.disconnect()
                 raise
             return session
 
-    async def _async_update_data(self) -> PropertyData:
-        if self._manually_disconnected:
-            return dict(self.data or {})
+    @asynccontextmanager
+    async def _operation_session(self) -> AsyncIterator[MiotBleSession]:
+        """Release an on-demand link before saving the latest device reports."""
+        if self._store is None:
+            try:
+                yield await self._ensure_session()
+            except Exception:
+                await self._drop_connection()
+                raise
+            return
+        previous = self.data
         try:
-            was_connected = self.connected
-            session = await self._ensure_session()
-            if was_connected and self.profile.poll_properties:
-                await session.request_properties(self._properties)
-            return {key: result.value for key, result in session.property_values.items()}
+            async with asyncio.timeout(ON_DEMAND_TIMEOUT):
+                yield await self._ensure_session()
+        finally:
+            try:
+                await self._drop_connection()
+            finally:
+                if self.data is not None and self.data != previous:
+                    await self._store.async_save(
+                        {p.name: self.data[p.key] for p in self._properties if p.key in self.data}
+                    )
+
+    async def _read_current(self) -> PropertyData:
+        async with self._operation_session() as session:
+            snapshot = {key: result.value for key, result in session.property_values.items()}
+            if self.profile.on_demand:
+                # Notify-only readings can be absent from the next session.
+                snapshot = (self.data or {}) | snapshot
+                self.async_set_updated_data(snapshot)
+            return snapshot
+
+    async def _async_update_data(self) -> PropertyData:
+        try:
+            async with self._operation_lock:
+                if self._manually_disconnected:
+                    return dict(self.data or {})
+                return await self._read_current()
         except AuthenticationError as error:
             _LOGGER.warning(
                 "Xiaomi BLE device %s rejected authentication: %s",
@@ -188,7 +250,6 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                 error,
                 exc_info=True,
             )
-            await self._drop_connection()
             raise ConfigEntryAuthFailed("The device rejected its BLE token") from error
         except Exception as error:
             _LOGGER.warning(
@@ -197,22 +258,16 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                 error,
                 exc_info=True,
             )
-            await self._drop_connection()
             raise UpdateFailed(str(error)) from error
 
     async def async_set_property(self, prop: PropertySpec, value: int | bool) -> None:
         """Write one property and update the coordinator cache."""
-        async with self._write_lock:
+        async with self._operation_lock:
             attempts = 2 if prop.retry_writes else 1
             for attempt in range(attempts):
                 try:
-                    session = await self._ensure_session()
-                    changed = await session.set_property(prop, value)
-                    # A momentary control can report a newer value before this task resumes.
-                    changed = session.property_values.get(changed.key, changed)
-                    data = dict(self.data or {})
-                    data[changed.key] = changed.value
-                    self.async_set_updated_data(data)
+                    async with self._operation_session() as session:
+                        await self._write_property(session, prop, value)
                     return
                 except Exception as error:
                     _LOGGER.warning(
@@ -223,26 +278,36 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                         error,
                         exc_info=True,
                     )
-                    await self._drop_connection()
                     if attempt + 1 == attempts:
                         raise
 
+    async def _write_property(
+        self, session: MiotBleSession, prop: PropertySpec, value: int | bool
+    ) -> None:
+        changed = await session.set_property(prop, value)
+        # A momentary control can report a newer value before this task resumes.
+        changed = session.property_values.get(changed.key, changed)
+        self.async_set_updated_data((self.data or {}) | {changed.key: changed.value})
+
+    async def async_toggle_switch(self, prop: PropertySpec) -> None:
+        """Read and invert the on-demand switch in one authenticated session."""
+        async with self._operation_lock, self._operation_session() as session:
+            current = session.property_values.get(prop.key)
+            if current is None or not isinstance(current.value, bool):
+                raise HomeAssistantError("Device did not report its switch position")
+            await self._write_property(session, prop, not current.value)
+
     async def async_connect(self) -> None:
-        """Resume automatic connection management and connect now."""
-        self._manually_disconnected = False
-        try:
-            session = await self._ensure_session()
-        except Exception:
-            self.async_update_listeners()
-            raise
-        self.async_set_updated_data(
-            {key: result.value for key, result in session.property_values.items()}
-        )
+        """Resume controls and read the device's current properties."""
+        async with self._operation_lock:
+            self._manually_disconnected = False
+            self.async_set_updated_data(await self._read_current())
 
     async def async_disconnect(self) -> None:
         """Disconnect and pause automatic reconnection."""
-        self._manually_disconnected = True
-        await self._drop_connection()
+        async with self._operation_lock:
+            self._manually_disconnected = True
+            await self._drop_connection()
 
     async def _drop_connection(self) -> None:
         client = self._client
@@ -250,12 +315,15 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         self._client = None
         self._session = None
         self.async_update_listeners()
-        if session is not None:
-            await session.async_close()
-        if client is not None and client.is_connected:
-            await client.disconnect()
+        try:
+            if session is not None:
+                await session.async_close()
+        finally:
+            if client is not None and client.is_connected:
+                await client.disconnect()
 
     async def async_shutdown(self) -> None:
         """Stop polling and disconnect from the device."""
         await super().async_shutdown()
-        await self._drop_connection()
+        async with self._operation_lock:
+            await self._drop_connection()

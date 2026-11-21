@@ -11,7 +11,7 @@ from custom_components.miot_ble.const import PLATFORMS
 
 @pytest.mark.asyncio
 async def test_setup_entry() -> None:
-    coordinator = SimpleNamespace(async_config_entry_first_refresh=AsyncMock())
+    coordinator = SimpleNamespace(async_initialize=AsyncMock())
     entry = SimpleNamespace(runtime_data=None)
     hass = SimpleNamespace(config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()))
     with patch(
@@ -20,7 +20,7 @@ async def test_setup_entry() -> None:
     ):
         assert await async_setup_entry(hass, entry)
     assert entry.runtime_data is coordinator
-    coordinator.async_config_entry_first_refresh.assert_awaited_once()
+    coordinator.async_initialize.assert_awaited_once()
     hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, PLATFORMS)
 
 

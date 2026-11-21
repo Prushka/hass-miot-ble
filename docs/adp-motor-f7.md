@@ -43,7 +43,7 @@ issue actions. Credentials are not part of this repository or the fixtures.
 A derived Charging state sensor displays the charging enumeration as text.
 Although the public spec permits writes to several other properties, this profile
 does not expose arm travel, resistance, calibration, clock, schedules, or counters
-as writable controls. Setup, reconnect, and status polling do not write any property.
+as writable controls. A status refresh reads the device without moving the arm.
 Mode changes only happen after an explicit select command.
 
 The switch value is the Fingerbot's raw logical property. It is not feedback from
@@ -91,10 +91,18 @@ BlueZ device path succeeded. Range/reconnection reliability needs longer observa
   header. A duplicated 16-byte challenge fragment could otherwise be combined with
   part of the proof, producing a 30-byte payload where 32 bytes are required.
   A synthetic retransmission test reproduces the failure and verifies the fix.
-- Refresh readable F7 properties every 60 seconds on an established connection.
-  This keeps readings current and avoids leaving the connection idle indefinitely.
-  The poll uses only GetProperty requests; notify-only battery is excluded.
-- A polling snapshot updates state but cannot confirm a pending write. Write
+- Open a connection only for an explicit command or **Refresh status**. Setup
+  restores the last reports from local Home Assistant storage. Idle time and a lost
+  connection do not trigger a reconnect. Each operation releases its link,
+  including after a timeout or cancellation.
+- Read the live switch position before **Toggle**, then send one write in the same
+  session. Commands and refreshes for the same Fingerbot run one at a time.
+- The **Connection** diagnostic is off between sessions. The switch and sensors
+  show the most recent report. An unseen property stays unknown. Battery is
+  notify-only and can stay at its last reported percentage for several sessions.
+- **Refresh status** also resumes a device paused with **Pause controls**. These
+  buttons reuse the existing Connect and Disconnect entity IDs on upgrade.
+- A read snapshot updates state but cannot confirm a pending write. Write
   completion requires a matching acknowledgement or a property-change notification.
 
 ## Local validation and installation
@@ -113,8 +121,11 @@ uv run --no-sync pytest
 Tests cover real advertisement discovery and read-response captures, GATT access
 permissions, Boolean/enum wire encoding, late battery notifications, startup ordering,
 write acknowledgements/rejections, and prevention of duplicate motor writes.
-Validation on 2026-11-10: 252 tests passed, 92.03% combined line/branch coverage;
-Ruff lint and formatting checks passed. The unchanged upstream baseline passed
+The on-demand service tests exercise two independent config entries, an external
+change to the switch position, queued requests, link loss, cancellation, and
+cached readings after a reload. On 2026-11-21 the suite passed all 256 tests with
+92.12% combined line and branch coverage. Ruff lint and formatting checks passed.
+The unchanged upstream baseline passed
 217 tests with 90.69% coverage in the same Linux environment.
 
 When ready for a supervised test, install `custom_components/miot_ble` from this

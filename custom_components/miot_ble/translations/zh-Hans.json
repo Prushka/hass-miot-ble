@@ -75,6 +75,12 @@
       }
     },
     "button": {
+      "refresh_status": {
+        "name": "刷新状态"
+      },
+      "pause_controls": {
+        "name": "暂停控制"
+      },
       "connect": {
         "name": "连接"
       },

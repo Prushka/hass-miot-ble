@@ -75,6 +75,12 @@
       }
     },
     "button": {
+      "refresh_status": {
+        "name": "Refresh status"
+      },
+      "pause_controls": {
+        "name": "Pause controls"
+      },
       "connect": {
         "name": "Connect"
       },

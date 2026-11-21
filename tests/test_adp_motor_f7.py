@@ -2,18 +2,27 @@
 
 import asyncio
 import json
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.const import CONF_ADDRESS, CONF_MODEL
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockModule,
+    async_fire_time_changed,
+    mock_integration,
+)
 
 from custom_components.miot_ble.config_flow import _profile_for_discovery, normalize_device_key
 from custom_components.miot_ble.const import CONF_TOKEN, DOMAIN, UUID_MI_SERVICE
-from custom_components.miot_ble.coordinator import MiotBleCoordinator
+from custom_components.miot_ble.coordinator import MiotBleCoordinator, property_store
 from custom_components.miot_ble.profile import ValueType
 from custom_components.miot_ble.profiles import ADP_MOTOR_F7, get_profile, profile_for_product_id
 from custom_components.miot_ble.protocol.session import (
@@ -25,6 +34,23 @@ from custom_components.miot_ble.protocol.tlv import PropertyValue, build_set, pa
 from custom_components.miot_ble.select import MiotBleSelect
 from custom_components.miot_ble.sensor import MiotBleSensor, MiotBleStateSensor
 from custom_components.miot_ble.switch import MiotBleSwitch
+
+COORDINATOR = "custom_components.miot_ble.coordinator"
+
+
+@pytest.fixture
+def fingerbot(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Fingerbot",
+        data={
+            CONF_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_MODEL: ADP_MOTOR_F7.model,
+            CONF_TOKEN: "00" * 12,
+        },
+    )
+    entry.add_to_hass(hass)
+    return entry
 
 
 def test_f7_profile_respects_bluetooth_permissions() -> None:
@@ -120,18 +146,10 @@ async def test_notify_only_battery_arrives_after_subscription() -> None:
 
 
 @pytest.mark.parametrize("piid", [1, 2])
-async def test_f7_does_not_repeat_an_unconfirmed_command(hass: HomeAssistant, piid: int) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Fingerbot",
-        data={
-            CONF_ADDRESS: "AA:BB:CC:DD:EE:FF",
-            CONF_MODEL: ADP_MOTOR_F7.model,
-            CONF_TOKEN: "00" * 12,
-        },
-    )
-    entry.add_to_hass(hass)
-    coordinator = MiotBleCoordinator(hass, entry)
+async def test_f7_does_not_repeat_an_unconfirmed_command(
+    hass: HomeAssistant, fingerbot: MockConfigEntry, piid: int
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
     coordinator.async_set_updated_data({(2, 1): False, (2, 2): 0})
     session = SimpleNamespace(
         set_property=AsyncMock(side_effect=ResponseTimeoutError("Reply lost after transmission"))
@@ -290,18 +308,10 @@ async def test_poll_snapshot_cannot_confirm_a_rejected_write() -> None:
         await session.async_close()
 
 
-async def test_f7_newer_notification_wins_over_write_confirmation(hass: HomeAssistant) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Fingerbot",
-        data={
-            CONF_ADDRESS: "AA:BB:CC:DD:EE:FF",
-            CONF_MODEL: ADP_MOTOR_F7.model,
-            CONF_TOKEN: "00" * 12,
-        },
-    )
-    entry.add_to_hass(hass)
-    coordinator = MiotBleCoordinator(hass, entry)
+async def test_f7_newer_notification_wins_over_write_confirmation(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
     session = SimpleNamespace(
         set_property=AsyncMock(return_value=PropertyValue(2, 1, ValueType.BOOL, True)),
         property_values={(2, 1): PropertyValue(2, 1, ValueType.BOOL, False)},
@@ -311,28 +321,168 @@ async def test_f7_newer_notification_wins_over_write_confirmation(hass: HomeAssi
     assert coordinator.data[(2, 1)] is False
 
 
-async def test_f7_polls_existing_session_without_motor_writes(hass: HomeAssistant) -> None:
-    entry = MockConfigEntry(
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_f7_services_and_reload_while_idle(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    mock_integration(hass, MockModule("bluetooth_adapters"))
+    second = MockConfigEntry(
         domain=DOMAIN,
-        title="Fingerbot",
-        data={
-            CONF_ADDRESS: "AA:BB:CC:DD:EE:FF",
-            CONF_MODEL: ADP_MOTOR_F7.model,
-            CONF_TOKEN: "00" * 12,
-        },
+        title="Second Fingerbot",
+        data={**fingerbot.data, CONF_ADDRESS: "11:22:33:44:55:66"},
     )
-    entry.add_to_hass(hass)
-    coordinator = MiotBleCoordinator(hass, entry)
-    session = SimpleNamespace(
-        authenticated=True,
-        receiver_running=True,
-        raise_if_receiver_failed=MagicMock(),
-        property_values={(2, 1): PropertyValue(2, 1, ValueType.BOOL, False)},
-        request_properties=AsyncMock(),
-        set_property=AsyncMock(),
-    )
-    coordinator._client = SimpleNamespace(is_connected=True)
-    coordinator._session = session
-    assert await coordinator._async_update_data() == {(2, 1): False}
-    session.request_properties.assert_awaited_once_with(ADP_MOTOR_F7.properties)
+    store = property_store(hass, fingerbot)
+    await store.async_save({"switch": True, "battery": 81, "mode": 123, "unknown": 9})
+    registry = er.async_get(hass)
+    client = SimpleNamespace(is_connected=True, disconnect=AsyncMock())
+    session = MagicMock(spec=MiotBleSession)
+    session.property_values = {(2, 1): PropertyValue(2, 1, ValueType.BOOL, False)}
+    prop = ADP_MOTOR_F7.property(2, 1)
+
+    async def confirm_write(_prop: object, value: bool) -> PropertyValue:
+        changed = PropertyValue(2, 1, ValueType.BOOL, value)
+        session.property_values[changed.key] = changed
+        return changed
+
+    session.set_property.side_effect = confirm_write
+    with (
+        patch(f"{COORDINATOR}.async_ble_device_from_address", return_value=MagicMock()),
+        patch(f"{COORDINATOR}.establish_connection", return_value=client) as connect,
+        patch(f"{COORDINATOR}.MiotBleSession", return_value=session),
+    ):
+        assert await hass.config_entries.async_setup(fingerbot.entry_id)
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+        switch = registry.async_get_entity_id("switch", DOMAIN, "aabbccddeeff_2_1")
+        second_switch = registry.async_get_entity_id("switch", DOMAIN, "112233445566_2_1")
+        assert hass.states.get(second_switch).state == "unknown"
+        refresh = registry.async_get_entity_id("button", DOMAIN, "aabbccddeeff_connect")
+        pause = registry.async_get_entity_id("button", DOMAIN, "aabbccddeeff_disconnect")
+        battery = registry.async_get_entity_id("sensor", DOMAIN, "aabbccddeeff_2_6")
+        mode = registry.async_get_entity_id("select", DOMAIN, "aabbccddeeff_2_2")
+        connection = registry.async_get_entity_id(
+            "binary_sensor", DOMAIN, "aabbccddeeff_connection"
+        )
+        assert hass.states.get(switch).state == "on"
+        assert hass.states.get(mode).state == "unknown"
+        assert hass.states.get(battery).state == "81"
+        assert hass.states.get(connection).state == "off"
+        assert fingerbot.runtime_data.update_interval is None
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=3))
+        await hass.async_block_till_done()
+        connect.assert_not_awaited()
+
+        # The motor changed outside HA while it was asleep. Invert the live False value.
+        await hass.services.async_call("switch", "toggle", {"entity_id": switch}, blocking=True)
+        session.set_property.assert_awaited_once_with(prop, True)
+        client.disconnect.assert_awaited_once()
+        await hass.services.async_call("button", "press", {"entity_id": pause}, blocking=True)
+        assert hass.states.get(switch).state == "unavailable"
+        session.property_values[prop.key] = PropertyValue(2, 1, ValueType.BOOL, False)
+        await hass.services.async_call("button", "press", {"entity_id": refresh}, blocking=True)
+        assert session.set_property.await_count == 1
+        assert client.disconnect.await_count == connect.await_count == 2
+        assert hass.states.get(switch).state == "off"
+        assert hass.states.get(battery).state == "81"
+        assert hass.states.get(connection).state == "off"
+
+        assert await hass.config_entries.async_reload(fingerbot.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get(switch).state == "off"
+        assert hass.states.get(battery).state == "81"
+        assert connect.await_count == 2
+        assert hass.states.get(second_switch).state == "unknown"
+        await hass.config_entries.async_remove(fingerbot.entry_id)
+        assert await property_store(hass, fingerbot).async_load() is None
+
+
+async def test_f7_unexpected_disconnect_does_not_reconnect(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
+    client = MagicMock()
+    session = MagicMock(spec=MiotBleSession)
+    coordinator._client, coordinator._session = client, session
+    with patch.object(coordinator, "async_refresh") as refresh:
+        coordinator._disconnected(client)
+        await hass.async_block_till_done()
+        refresh.assert_not_awaited()
+    session.cancel_background_tasks.assert_called_once()
+    assert not coordinator.connected
+
+
+async def test_f7_missing_live_switch_never_writes(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
+    coordinator.async_set_updated_data({(2, 1): True})
+    session = MagicMock(spec=MiotBleSession)
+    session.property_values = {}
+    with (
+        patch.object(coordinator, "_ensure_session", return_value=session),
+        patch.object(coordinator, "_drop_connection") as release,
+        pytest.raises(HomeAssistantError, match="switch position"),
+    ):
+        await coordinator.async_toggle_switch(ADP_MOTOR_F7.property(2, 1))
     session.set_property.assert_not_awaited()
+    release.assert_awaited_once()
+
+
+async def test_f7_stalled_login_times_out_and_disconnects(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
+    client = SimpleNamespace(is_connected=True, disconnect=AsyncMock())
+    session = MagicMock(spec=MiotBleSession)
+    session.login.side_effect = asyncio.Event().wait
+    with (
+        patch(f"{COORDINATOR}.ON_DEMAND_TIMEOUT", 0.02),
+        patch(f"{COORDINATOR}.async_ble_device_from_address", return_value=MagicMock()),
+        patch(f"{COORDINATOR}.establish_connection", return_value=client) as connect,
+        patch(f"{COORDINATOR}.MiotBleSession", return_value=session),
+        pytest.raises(TimeoutError),
+    ):
+        await coordinator.async_connect()
+    connect.assert_awaited_once()
+    client.disconnect.assert_awaited_once()
+    session.async_close.assert_awaited_once()
+    session.set_property.assert_not_awaited()
+    assert not coordinator.connected
+
+
+async def test_f7_cancelled_command_releases_link_before_queued_refresh(
+    hass: HomeAssistant, fingerbot: MockConfigEntry
+) -> None:
+    coordinator = MiotBleCoordinator(hass, fingerbot)
+    session = MagicMock(spec=MiotBleSession)
+    session.property_values = {}
+    writing = asyncio.Event()
+    events: list[str] = []
+
+    async def connect() -> MiotBleSession:
+        events.append("connect")
+        return session
+
+    async def wait_for_reply(*_args: object) -> None:
+        writing.set()
+        await asyncio.Event().wait()
+
+    session.set_property.side_effect = wait_for_reply
+    with (
+        patch.object(coordinator, "_ensure_session", side_effect=connect),
+        patch.object(coordinator, "_drop_connection", side_effect=lambda: events.append("release")),
+    ):
+        command = asyncio.create_task(
+            coordinator.async_set_property(ADP_MOTOR_F7.property(2, 1), True)
+        )
+        await asyncio.wait_for(writing.wait(), 1)
+        refresh = asyncio.create_task(coordinator.async_connect())
+        await asyncio.sleep(0)
+        assert events == ["connect"]
+        command.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await command
+        await refresh
+    assert events == ["connect", "release", "connect", "release"]
+    session.set_property.assert_awaited_once()

@@ -21,8 +21,11 @@ installing this checkout. The upstream HACS release does not include this profil
 | Xiaomi Smart Waist and Back Massager YB11 | `xiaomi.magic_touch.yb11` | Power, device status, mode, timer, heating, regional massage, beep, battery |
 | Xiaomi Smart Neck Massager M14 | `soocare.magic_touch.m14` | Power, device status, mode, heating, battery |
 
-Every supported device also provides its connection state and Connect and
-Disconnect buttons.
+The Fingerbot connects for a switch command, a mode change, or **Refresh status**,
+then disconnects. Its switches stay available to automations while idle. Sensors
+keep their last reported values across restarts. Battery updates when the device
+sends a notification during a session. **Pause controls** disables access until
+the next **Refresh status**. Other profiles have Connect and Disconnect buttons.
 
 ## Installation
 

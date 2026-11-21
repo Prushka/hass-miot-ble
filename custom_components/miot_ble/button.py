@@ -47,6 +47,8 @@ class MiotBleConnectButton(MiotBleConnectionButton):
 
     def __init__(self, coordinator: MiotBleCoordinator) -> None:
         super().__init__(coordinator, "connect")
+        if coordinator.profile.on_demand:
+            self._attr_translation_key = "refresh_status"
 
     @property
     def available(self) -> bool:
@@ -63,10 +65,14 @@ class MiotBleDisconnectButton(MiotBleConnectionButton):
 
     def __init__(self, coordinator: MiotBleCoordinator) -> None:
         super().__init__(coordinator, "disconnect")
+        if coordinator.profile.on_demand:
+            self._attr_translation_key = "pause_controls"
 
     @property
     def available(self) -> bool:
-        """Allow manual disconnection only while connected."""
+        """Allow an on-demand device to be paused while idle."""
+        if self.coordinator.profile.on_demand:
+            return not self.coordinator.manually_disconnected
         return self.coordinator.connected
 
     async def async_press(self) -> None:
