@@ -21,6 +21,7 @@ from .const import CONF_TOKEN, DEFAULT_UPDATE_INTERVAL, DOMAIN
 from .profile import DeviceProfile, PropertySpec
 from .profiles import get_profile
 from .protocol import AuthenticationError, MiotBleSession, PropertyValue
+from .protocol.session import BeforePayload
 
 _LOGGER = logging.getLogger(__name__)
 ON_DEMAND_TIMEOUT = 45
@@ -102,8 +103,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
     def connected(self) -> bool:
         """Return whether the authenticated property channel is usable."""
         return bool(
-            not self._manually_disconnected
-            and self._client is not None
+            self._client is not None
             and self._client.is_connected
             and self._session is not None
             and self._session.authenticated
@@ -132,10 +132,10 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         data.update((value.key, value.value) for value in values)
         self.async_set_updated_data(data)
 
-    async def _ensure_session(self) -> MiotBleSession:
+    async def _ensure_session(self, *, read_only: bool = False) -> MiotBleSession:
         if self._shutdown_requested:
             raise ConnectionError("Bluetooth connection manager has stopped")
-        if self._manually_disconnected:
+        if self._manually_disconnected and not (read_only and self.profile.on_demand):
             raise ConnectionError("Bluetooth connection is manually disconnected")
         if self.connected:
             assert self._session is not None
@@ -206,11 +206,11 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
             return session
 
     @asynccontextmanager
-    async def _operation_session(self) -> AsyncIterator[MiotBleSession]:
+    async def _operation_session(self, *, read_only: bool = False) -> AsyncIterator[MiotBleSession]:
         """Release an on-demand link before saving the latest device reports."""
         if self._store is None:
             try:
-                yield await self._ensure_session()
+                yield await self._ensure_session(read_only=read_only)
             except Exception:
                 await self._drop_connection()
                 raise
@@ -218,7 +218,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
         previous = self.data
         try:
             async with asyncio.timeout(ON_DEMAND_TIMEOUT):
-                yield await self._ensure_session()
+                yield await self._ensure_session(read_only=read_only)
         finally:
             try:
                 await self._drop_connection()
@@ -229,7 +229,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                     )
 
     async def _read_current(self) -> PropertyData:
-        async with self._operation_session() as session:
+        async with self._operation_session(read_only=True) as session:
             snapshot = {key: result.value for key, result in session.property_values.items()}
             if self.profile.on_demand:
                 # Notify-only readings can be absent from the next session.
@@ -240,7 +240,7 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
     async def _async_update_data(self) -> PropertyData:
         try:
             async with self._operation_lock:
-                if self._manually_disconnected:
+                if self._manually_disconnected and not self.profile.on_demand:
                     return dict(self.data or {})
                 return await self._read_current()
         except AuthenticationError as error:
@@ -282,26 +282,39 @@ class MiotBleCoordinator(DataUpdateCoordinator[PropertyData]):
                         raise
 
     async def _write_property(
-        self, session: MiotBleSession, prop: PropertySpec, value: int | bool
+        self,
+        session: MiotBleSession,
+        prop: PropertySpec,
+        value: int | bool,
+        before_payload: BeforePayload | None = None,
     ) -> None:
-        changed = await session.set_property(prop, value)
+        changed = await session.set_property(prop, value, before_payload=before_payload)
         # A momentary control can report a newer value before this task resumes.
         changed = session.property_values.get(changed.key, changed)
         self.async_set_updated_data((self.data or {}) | {changed.key: changed.value})
 
-    async def async_toggle_switch(self, prop: PropertySpec) -> None:
+    async def async_toggle_switch(
+        self, prop: PropertySpec, *, before_payload: BeforePayload | None = None
+    ) -> None:
         """Read and invert the on-demand switch in one authenticated session."""
         async with self._operation_lock, self._operation_session() as session:
             current = session.property_values.get(prop.key)
             if current is None or not isinstance(current.value, bool):
                 raise HomeAssistantError("Device did not report its switch position")
-            await self._write_property(session, prop, not current.value)
+            await self._write_property(session, prop, not current.value, before_payload)
 
     async def async_connect(self) -> None:
-        """Resume controls and read the device's current properties."""
+        """Read an on-demand device or resume a persistent connection."""
+        async with self._operation_lock:
+            if not self.profile.on_demand:
+                self._manually_disconnected = False
+            self.async_set_updated_data(await self._read_current())
+
+    async def async_resume_controls(self) -> None:
+        """Allow on-demand commands again without opening a connection."""
         async with self._operation_lock:
             self._manually_disconnected = False
-            self.async_set_updated_data(await self._read_current())
+            self.async_update_listeners()
 
     async def async_disconnect(self) -> None:
         """Disconnect and pause automatic reconnection."""

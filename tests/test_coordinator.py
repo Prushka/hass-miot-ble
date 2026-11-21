@@ -111,7 +111,7 @@ async def test_set_reconnects_and_retries_once(hass: HomeAssistant) -> None:
     await coordinator.async_set_property(power, 1)
 
     coordinator._drop_connection.assert_awaited_once()
-    recovered_session.set_property.assert_awaited_once_with(power, 1)
+    recovered_session.set_property.assert_awaited_once_with(power, 1, before_payload=None)
     assert coordinator.data == {(2, 1): 1}
 
 

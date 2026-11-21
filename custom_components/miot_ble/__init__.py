@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.typing import ConfigType
 
 from .const import PLATFORMS
+from .press import async_register_press_once
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register Fingerbot actions for scripts and automations."""
+    async_register_press_once(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

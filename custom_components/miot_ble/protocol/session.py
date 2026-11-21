@@ -7,7 +7,7 @@ import logging
 import os
 import struct
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any, Protocol
 
@@ -29,6 +29,8 @@ from .crypto import MeshSessionKeys, SessionKeys
 from .tlv import Operation, PropertyValue, build_set, build_subscribe, parse_properties
 
 _LOGGER = logging.getLogger(__name__)
+
+type BeforePayload = Callable[[], Awaitable[None]]
 
 CMD_LOGIN = bytes.fromhex("24000000")
 MESH_CMD_LOGIN = bytes.fromhex("50000000")
@@ -456,16 +458,22 @@ class MiotBleSession:
         ciphertext = self._keys.encrypt_from_app(self._tx_counter, plaintext)
         return struct.pack("<H", self._tx_counter) + ciphertext
 
-    async def _send_request(self, plaintext: bytes) -> None:
+    async def _send_request(
+        self, plaintext: bytes, before_payload: BeforePayload | None = None
+    ) -> None:
         payload = self._encrypt(plaintext)
         if self._uses_mesh:
             await self._write(UUID_MIOT_WRITE, bytes((0, 0, 0, 0, 1, 0)))
             await self._wait_data(UUID_MIOT_WRITE, RECEIVE_READY)
+            if before_payload is not None:
+                await before_payload()
             await self._write(UUID_MIOT_WRITE, bytes((1, 0)) + payload)
             return
         parcels = self._parcels(payload)
         await self._write(UUID_MIOT_WRITE, bytes(4) + struct.pack("<H", len(parcels)))
         await self._wait_data(UUID_MIOT_WRITE, RECEIVE_READY)
+        if before_payload is not None:
+            await before_payload()
         for parcel in parcels:
             await self._write(UUID_MIOT_WRITE, parcel)
         await self._wait_data(UUID_MIOT_WRITE, RECEIVE_OK)
@@ -738,7 +746,9 @@ class MiotBleSession:
             with suppress(asyncio.CancelledError):
                 await task
 
-    async def set_property(self, prop: PropertySpec, value: int | bool) -> PropertyValue:
+    async def set_property(
+        self, prop: PropertySpec, value: int | bool, *, before_payload: BeforePayload | None = None
+    ) -> PropertyValue:
         """Write one property and wait for the device's change notification."""
         async with self._command_lock:
             self.raise_if_receiver_failed()
@@ -757,7 +767,7 @@ class MiotBleSession:
                     pending,
                 )
                 try:
-                    await self._send_request(request)
+                    await self._send_request(request, before_payload)
                     try:
                         return await asyncio.wait_for(pending, self._timeout)
                     except TimeoutError as error:
@@ -766,7 +776,9 @@ class MiotBleSession:
                         ) from error
                 finally:
                     self._pending_responses.pop(transaction_id, None)
-            await self._send_request(request)
+                    if pending.done() and not pending.cancelled():
+                        pending.exception()
+            await self._send_request(request, before_payload)
             while True:
                 response = await self._receive_encrypted()
                 try:

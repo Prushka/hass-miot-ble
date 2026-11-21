@@ -1,0 +1,22 @@
+press_once:
+  target:
+    entity:
+      - integration: miot_ble
+        domain: switch
+  fields:
+    attempt_helper:
+      required: true
+      selector:
+        entity:
+          domain: input_select
+    from_option:
+      required: true
+      selector:
+        text:
+    option:
+      required: true
+      selector:
+        text:
+    required_states:
+      selector:
+        object:

@@ -159,7 +159,9 @@ async def test_f7_does_not_repeat_an_unconfirmed_command(
     value = {1: True, 2: 1}[piid]
     with pytest.raises(ResponseTimeoutError, match="Reply lost"):
         await coordinator.async_set_property(ADP_MOTOR_F7.property(2, piid), value)
-    session.set_property.assert_awaited_once_with(ADP_MOTOR_F7.property(2, piid), value)
+    session.set_property.assert_awaited_once_with(
+        ADP_MOTOR_F7.property(2, piid), value, before_payload=None
+    )
     coordinator._ensure_session.assert_awaited_once()
     coordinator._drop_connection.assert_awaited_once()
     assert coordinator.data == {(2, 1): False, (2, 2): 0}
@@ -252,7 +254,7 @@ async def test_standard_auth_accepts_matching_set_ack(
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
     session._receive_encrypted = incoming.get
 
-    async def send(request: bytes) -> None:
+    async def send(request: bytes, before_payload: object) -> None:
         incoming.put_nowait(bytes.fromhex("0b20b00001010201000000"))
         incoming.put_nowait(bytes.fromhex("0b20b10001010203000000"))
         incoming.put_nowait(bytes.fromhex(reply))
@@ -275,7 +277,7 @@ async def test_standard_auth_rejects_failed_set_ack() -> None:
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
     session._receive_encrypted = incoming.get
 
-    async def send(request: bytes) -> None:
+    async def send(request: bytes, before_payload: object) -> None:
         incoming.put_nowait(bytes.fromhex("0b20b10001010201000300"))
 
     session._send_request = AsyncMock(side_effect=send)
@@ -294,7 +296,7 @@ async def test_poll_snapshot_cannot_confirm_a_rejected_write() -> None:
     incoming: asyncio.Queue[bytes] = asyncio.Queue()
     session._receive_encrypted = incoming.get
 
-    async def send(request: bytes) -> None:
+    async def send(request: bytes, before_payload: object) -> None:
         incoming.put_nowait(bytes.fromhex("0e20b00003010201000000010001"))
         incoming.put_nowait(bytes.fromhex("0b20b10001010201000300"))
 
@@ -339,7 +341,7 @@ async def test_f7_services_and_reload_while_idle(
     session.property_values = {(2, 1): PropertyValue(2, 1, ValueType.BOOL, False)}
     prop = ADP_MOTOR_F7.property(2, 1)
 
-    async def confirm_write(_prop: object, value: bool) -> PropertyValue:
+    async def confirm_write(_prop: object, value: bool, *, before_payload: object) -> PropertyValue:
         changed = PropertyValue(2, 1, ValueType.BOOL, value)
         session.property_values[changed.key] = changed
         return changed
@@ -359,6 +361,7 @@ async def test_f7_services_and_reload_while_idle(
         assert hass.states.get(second_switch).state == "unknown"
         refresh = registry.async_get_entity_id("button", DOMAIN, "aabbccddeeff_connect")
         pause = registry.async_get_entity_id("button", DOMAIN, "aabbccddeeff_disconnect")
+        resume = registry.async_get_entity_id("button", DOMAIN, "aabbccddeeff_resume_controls")
         battery = registry.async_get_entity_id("sensor", DOMAIN, "aabbccddeeff_2_6")
         mode = registry.async_get_entity_id("select", DOMAIN, "aabbccddeeff_2_2")
         connection = registry.async_get_entity_id(
@@ -375,7 +378,7 @@ async def test_f7_services_and_reload_while_idle(
 
         # The motor changed outside HA while it was asleep. Invert the live False value.
         await hass.services.async_call("switch", "toggle", {"entity_id": switch}, blocking=True)
-        session.set_property.assert_awaited_once_with(prop, True)
+        session.set_property.assert_awaited_once_with(prop, True, before_payload=None)
         client.disconnect.assert_awaited_once()
         await hass.services.async_call("button", "press", {"entity_id": pause}, blocking=True)
         assert hass.states.get(switch).state == "unavailable"
@@ -383,6 +386,10 @@ async def test_f7_services_and_reload_while_idle(
         await hass.services.async_call("button", "press", {"entity_id": refresh}, blocking=True)
         assert session.set_property.await_count == 1
         assert client.disconnect.await_count == connect.await_count == 2
+        assert hass.states.get(switch).state == "unavailable"
+        assert hass.states.get(battery).state == "81"
+        await hass.services.async_call("button", "press", {"entity_id": resume}, blocking=True)
+        assert connect.await_count == 2
         assert hass.states.get(switch).state == "off"
         assert hass.states.get(battery).state == "81"
         assert hass.states.get(connection).state == "off"
@@ -460,11 +467,11 @@ async def test_f7_cancelled_command_releases_link_before_queued_refresh(
     writing = asyncio.Event()
     events: list[str] = []
 
-    async def connect() -> MiotBleSession:
+    async def connect(*, read_only: bool) -> MiotBleSession:
         events.append("connect")
         return session
 
-    async def wait_for_reply(*_args: object) -> None:
+    async def wait_for_reply(*_args: object, **_kwargs: object) -> None:
         writing.set()
         await asyncio.Event().wait()
 

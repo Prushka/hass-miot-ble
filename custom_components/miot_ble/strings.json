@@ -68,6 +68,30 @@
       "missing_cloud_challenge": "Xiaomi Cloud verification expired; start the flow again"
     }
   },
+  "services": {
+    "press_once": {
+      "name": "Press once for a request",
+      "description": "Read the Fingerbot position and record the requested option just before transmitting the motor command.",
+      "fields": {
+        "attempt_helper": {
+          "name": "Last attempt",
+          "description": "Input select that records the last attempted option."
+        },
+        "from_option": {
+          "name": "Expected previous option",
+          "description": "The helper must still have this value before the press."
+        },
+        "option": {
+          "name": "Requested option",
+          "description": "The option to record when sending the press."
+        },
+        "required_states": {
+          "name": "Required states",
+          "description": "Entity IDs and their states to check again immediately before sending."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "connection": {
@@ -75,6 +99,9 @@
       }
     },
     "button": {
+      "resume_controls": {
+        "name": "Resume controls"
+      },
       "refresh_status": {
         "name": "Refresh status"
       },

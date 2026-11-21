@@ -1,0 +1,67 @@
+blueprint:
+  name: Apply binary demand with two Fingerbots
+  description: Press the dedicated On or Off Fingerbot once when the requested state changes.
+  domain: script
+  input:
+    demand:
+      name: Demand
+      selector:
+        entity:
+          domain: input_boolean
+    on_switch:
+      name: On Fingerbot
+      selector:
+        entity:
+          filter:
+            - integration: miot_ble
+              domain: switch
+    off_switch:
+      name: Off Fingerbot
+      selector:
+        entity:
+          filter:
+            - integration: miot_ble
+              domain: switch
+    attempt_helper:
+      name: Last attempted demand
+      description: An input select with the options none, on and off.
+      selector:
+        entity:
+          domain: input_select
+    enabled_by:
+      name: Entities that must be on
+      default: []
+      selector:
+        entity:
+          multiple: true
+mode: queued
+variables:
+  demand_id: !input demand
+  on_id: !input on_switch
+  off_id: !input off_switch
+  attempt_id: !input attempt_helper
+  enabled_ids: !input enabled_by
+sequence:
+  - variables:
+      desired: "{{ states(demand_id) }}"
+      previous: "{{ states(attempt_id) }}"
+  - variables:
+      bot: "{{ on_id if desired == 'on' else off_id }}"
+  - condition: template
+    value_template: >-
+      {{ desired in ['on', 'off'] and previous in ['none', 'on', 'off']
+         and desired != previous and (desired == 'on' or previous == 'on')
+         and states[bot] is not none and not is_state(bot, 'unavailable') }}
+  - action: miot_ble.press_once
+    target:
+      entity_id: "{{ bot }}"
+    data:
+      attempt_helper: "{{ attempt_id }}"
+      from_option: "{{ previous }}"
+      option: "{{ desired }}"
+      required_states: >-
+        {% set ns = namespace(pairs=[(demand_id, desired)]) %}
+        {% for entity_id in enabled_ids %}
+          {% set ns.pairs = ns.pairs + [(entity_id, 'on')] %}
+        {% endfor %}
+        {{ dict(ns.pairs) }}

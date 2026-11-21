@@ -100,8 +100,20 @@ BlueZ device path succeeded. Range/reconnection reliability needs longer observa
 - The **Connection** diagnostic is off between sessions. The switch and sensors
   show the most recent report. An unseen property stays unknown. Battery is
   notify-only and can stay at its last reported percentage for several sessions.
-- **Refresh status** also resumes a device paused with **Pause controls**. These
-  buttons reuse the existing Connect and Disconnect entity IDs on upgrade.
+- **Refresh status** reads diagnostics while paused. **Resume controls** separately
+  enables commands without opening a link. Refresh and Pause reuse the earlier
+  Connect and Disconnect entity IDs. Pause is local to the running coordinator.
+- For a pair of momentary controls use the binary demand script blueprint with
+  two Click-mode Fingerbots and an input select with the options `none`, `on`,
+  and `off`. The first Off demand is skipped. Invoke the script when demand changes
+  and periodically for pending requests. Reading status does not schedule a press.
+- The action `miot_ble.press_once` reads the live position even on a new device
+  with an unknown switch state. After the transport acknowledges its transfer
+  header, the action rechecks the helper and required states and records the
+  attempt immediately before the first encrypted payload write. Connection,
+  authentication, initial read, and header failures leave the request pending.
+  A lost payload acknowledgement keeps the reservation. An ordinary HA input
+  select has the same hard-power-loss persistence limits as other restore helpers.
 - A read snapshot updates state but cannot confirm a pending write. Write
   completion requires a matching acknowledgement or a property-change notification.
 
@@ -123,8 +135,10 @@ permissions, Boolean/enum wire encoding, late battery notifications, startup ord
 write acknowledgements/rejections, and prevention of duplicate motor writes.
 The on-demand service tests exercise two independent config entries, an external
 change to the switch position, queued requests, link loss, cancellation, and
-cached readings after a reload. On 2026-11-21 the suite passed all 256 tests with
-92.12% combined line and branch coverage. Ruff lint and formatting checks passed.
+cached readings after a reload. The demand tests exercise the actual script on a
+cold pair, safe retries, lost acknowledgements, permission checks, and cancellation
+while reserving a press. Version 0.14.0 passed 275 tests with 92.22% combined
+line and branch coverage. Ruff lint and formatting checks passed.
 The unchanged upstream baseline passed
 217 tests with 90.69% coverage in the same Linux environment.
 

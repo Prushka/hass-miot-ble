@@ -26,7 +26,7 @@ class MiotBleDataEntity(CoordinatorEntity[MiotBleCoordinator]):
     @property
     def available(self) -> bool:
         if self.coordinator.profile.on_demand:
-            return not self.coordinator.manually_disconnected
+            return True
         return super().available and self.coordinator.connected
 
 
@@ -42,6 +42,13 @@ class MiotBleEntity(MiotBleDataEntity):
         self._attr_unique_id = f"{address}_{prop.siid}_{prop.piid}"
         self._attr_name = prop.name.replace("_", " ").title()
         self._attr_device_info = device_info(coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Keep writable controls disabled during a paused status read."""
+        if self.coordinator.profile.on_demand and self.property_spec.writable:
+            return not self.coordinator.manually_disconnected
+        return super().available
 
     @property
     def property_value(self) -> int | bool | None:

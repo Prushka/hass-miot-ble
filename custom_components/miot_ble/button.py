@@ -20,12 +20,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up manual BLE connection controls."""
     coordinator: MiotBleCoordinator = entry.runtime_data
-    async_add_entities(
-        (
-            MiotBleConnectButton(coordinator),
-            MiotBleDisconnectButton(coordinator),
-        )
-    )
+    buttons = [MiotBleConnectButton(coordinator), MiotBleDisconnectButton(coordinator)]
+    if coordinator.profile.on_demand:
+        buttons.append(MiotBleResumeButton(coordinator))
+    async_add_entities(buttons)
 
 
 class MiotBleConnectionButton(CoordinatorEntity[MiotBleCoordinator], ButtonEntity):
@@ -78,3 +76,17 @@ class MiotBleDisconnectButton(MiotBleConnectionButton):
     async def async_press(self) -> None:
         """Disconnect the BLE property channel."""
         await self.coordinator.async_disconnect()
+
+
+class MiotBleResumeButton(MiotBleConnectionButton):
+    """Release a manual pause independently of status reads."""
+
+    def __init__(self, coordinator: MiotBleCoordinator) -> None:
+        super().__init__(coordinator, "resume_controls")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.manually_disconnected
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_resume_controls()

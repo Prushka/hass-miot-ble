@@ -24,8 +24,14 @@ installing this checkout. The upstream HACS release does not include this profil
 The Fingerbot connects for a switch command, a mode change, or **Refresh status**,
 then disconnects. Its switches stay available to automations while idle. Sensors
 keep their last reported values across restarts. Battery updates when the device
-sends a notification during a session. **Pause controls** disables access until
-the next **Refresh status**. Other profiles have Connect and Disconnect buttons.
+sends a notification during a session. **Refresh status** can read a paused
+Fingerbot. Its switch and mode stay disabled until **Resume controls** or an
+integration restart. Other profiles have Connect and Disconnect buttons.
+
+For automations with dedicated On and Off Fingerbots, the
+[binary demand script blueprint](blueprints/script/miot_ble/press_for_binary_demand.yaml)
+uses `miot_ble.press_once` to record a request once the device is ready to receive
+the motor command. Call the script on demand transitions and on a timed retry.
 
 ## Installation
 

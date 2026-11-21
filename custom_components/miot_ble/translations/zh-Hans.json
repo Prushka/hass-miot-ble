@@ -68,6 +68,30 @@
       "missing_cloud_challenge": "小米云验证已失效，请重新开始添加流程"
     }
   },
+  "services": {
+    "press_once": {
+      "name": "按请求按压一次",
+      "description": "读取手指机器人的当前位置，在即将发送电机命令时记录请求。",
+      "fields": {
+        "attempt_helper": {
+          "name": "上次尝试",
+          "description": "记录上次尝试选项的下拉选择助手。"
+        },
+        "from_option": {
+          "name": "预期的先前选项",
+          "description": "助手必须处于此选项才可按压。"
+        },
+        "option": {
+          "name": "请求的选项",
+          "description": "在发出命令时记录的选项。"
+        },
+        "required_states": {
+          "name": "必需状态",
+          "description": "发送前再次核对的实体及其状态。"
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "connection": {
@@ -75,6 +99,9 @@
       }
     },
     "button": {
+      "resume_controls": {
+        "name": "恢复控制"
+      },
       "refresh_status": {
         "name": "刷新状态"
       },
